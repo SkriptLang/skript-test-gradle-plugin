@@ -1,8 +1,9 @@
 plugins {
     java
-    id("com.ncorti.kotlin.gradle.template.plugin")
+    id("org.skriptlang.gradle.test.plugin")
 }
 
-templateExampleConfig {
-    message.set("Just trying this gradle plugin...")
+tasks.skriptTest {
+    extraPluginsDirectory = File("build.gradle.kts")
+    testScriptDirectory = File("build.gradle.kts")
 }

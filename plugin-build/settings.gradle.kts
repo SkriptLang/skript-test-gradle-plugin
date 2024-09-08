@@ -31,6 +31,6 @@ develocity {
 	}
 }
 
-rootProject.name = ("com.ncorti.kotlin.gradle.template")
+rootProject.name = ("org.skriptlang.gradle.test.plugin")
 
 include(":plugin")
