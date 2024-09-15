@@ -31,7 +31,7 @@ gradlePlugin {
 tasks {
     compileKotlin {
         kotlinOptions {
-            jvmTarget = "21"
+            jvmTarget = "11"
         }
     }
 }
