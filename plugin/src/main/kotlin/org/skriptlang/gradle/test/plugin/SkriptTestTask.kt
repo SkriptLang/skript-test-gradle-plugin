@@ -2,20 +2,21 @@ package org.skriptlang.gradle.test.plugin
 
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.RegularFileProperty
-import org.gradle.api.plugins.BasePlugin
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.Optional
 import org.gradle.api.tasks.TaskAction
 import org.gradle.api.tasks.options.Option
+import org.gradle.language.base.plugins.LifecycleBasePlugin
 import java.nio.file.Files
 import java.nio.file.Path
 
 abstract class SkriptTestTask : DefaultTask() {
+
     init {
         description = "Run Skript tests"
-        group = BasePlugin.BUILD_GROUP
+        group = LifecycleBasePlugin.VERIFICATION_GROUP
     }
 
     @get:InputFile
@@ -41,7 +42,7 @@ abstract class SkriptTestTask : DefaultTask() {
     @get:Optional
     abstract val runVanillaTests: Property<Boolean>
 
-    fun runCommand(requiredExitValue: Int, workingDirectory: Path, vararg command: String) {
+    private fun runCommand(requiredExitValue: Int, workingDirectory: Path, vararg command: String) {
         val processBuilder = ProcessBuilder(command.asList()).directory(workingDirectory.toFile())
         val process = processBuilder.start()
         process.waitFor()
