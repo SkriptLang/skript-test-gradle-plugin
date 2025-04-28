@@ -1,16 +1,26 @@
 package org.skriptlang.gradle.test.plugin
 
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.SerializationFeature
+import com.fasterxml.jackson.databind.node.ArrayNode
+import com.fasterxml.jackson.databind.node.ObjectNode
 import org.gradle.api.DefaultTask
-import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Input
-import org.gradle.api.tasks.InputFile
+import org.gradle.api.tasks.InputDirectory
 import org.gradle.api.tasks.Optional
 import org.gradle.api.tasks.TaskAction
 import org.gradle.api.tasks.options.Option
 import org.gradle.language.base.plugins.LifecycleBasePlugin
+import java.io.BufferedReader
+import java.io.File
+import java.io.InputStreamReader
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlin.io.path.extension
+import kotlin.io.path.isRegularFile
 
 abstract class SkriptTestTask : DefaultTask() {
 
@@ -19,13 +29,13 @@ abstract class SkriptTestTask : DefaultTask() {
         group = LifecycleBasePlugin.VERIFICATION_GROUP
     }
 
-    @get:InputFile
+    @get:InputDirectory
     @get:Option(option = "testScriptDirectory", description = "The directory containing the test scripts to run")
-    abstract val testScriptDirectory: RegularFileProperty
+    abstract val testScriptDirectory: DirectoryProperty
 
-    @get:InputFile
+    @get:InputDirectory
     @get:Option(option = "extraPluginsDirectory", description = "The directory of extra plugins to put on the test server")
-    abstract val extraPluginsDirectory: RegularFileProperty
+    abstract val extraPluginsDirectory: DirectoryProperty
 
     @get:Input
     @get:Option(option = "skriptRepoRef", description = "The Git ref to check out the Skript repo at")
@@ -43,8 +53,23 @@ abstract class SkriptTestTask : DefaultTask() {
     abstract val runVanillaTests: Property<Boolean>
 
     private fun runCommand(requiredExitValue: Int, workingDirectory: Path, vararg command: String) {
+        runCommand(requiredExitValue, workingDirectory, false, *command)
+    }
+
+    private fun runCommand(requiredExitValue: Int, workingDirectory: Path, printOutput: Boolean, vararg command: String) {
         val processBuilder = ProcessBuilder(command.asList()).directory(workingDirectory.toFile())
+        processBuilder.redirectErrorStream(true)
+
         val process = processBuilder.start()
+
+        if (printOutput) {
+            val reader = BufferedReader(InputStreamReader(process.inputStream))
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                println("| $line")
+            }
+        }
+
         process.waitFor()
         if (process.exitValue() != requiredExitValue) {
             throw IllegalStateException("${command.joinToString(" ")} returned exit code ${process.exitValue()}")
@@ -54,16 +79,85 @@ abstract class SkriptTestTask : DefaultTask() {
     @TaskAction
     fun runTests() {
         val skriptRepoDir = Files.createTempDirectory("skript-test-skript-repo").toAbsolutePath()
+        println("git init")
         runCommand(0, skriptRepoDir, "git", "init")
+        println("git remote add origin " + skriptRepo.getOrElse("https://github.com/SkriptLang/Skript.git"))
         runCommand(0, skriptRepoDir, "git", "remote", "add", "origin", skriptRepo.getOrElse("https://github.com/SkriptLang/Skript.git"))
+        println("git fetch --depth 1 origin " + skriptRepoRef.getOrElse("master"))
         runCommand(0, skriptRepoDir, "git", "fetch", "--depth", "1", "origin", skriptRepoRef.getOrElse("master"))
+        println("git checkout FETCH_HEAD")
         runCommand(0, skriptRepoDir, "git", "checkout", "FETCH_HEAD")
+        println("git submodule update --init --depth 1")
         runCommand(0, skriptRepoDir, "git", "submodule", "update", "--init", "--depth", "1")
+
+        val vanillaTestDir = skriptRepoDir.resolve("src/test/skript/tests").toFile()
+
+        // delete vanilla test scripts if not running them
+        if (!runVanillaTests.getOrElse(true)) {
+            println("Deleting vanilla test scripts")
+            if (vanillaTestDir.exists()) {
+                vanillaTestDir.deleteRecursively()
+                vanillaTestDir.mkdir()
+            }
+        }
+
+        // copy test scripts
+        val testScriptDir = testScriptDirectory.get().asFile
+        if (testScriptDir.exists()) {
+            println("Copying test scripts from ${testScriptDir.absolutePath} to ${vanillaTestDir.absolutePath}")
+            val customTests = File(vanillaTestDir, "custom")
+            customTests.mkdir()
+            testScriptDir.copyRecursively(customTests)
+        }
+
+        // copy extra plugins
+        val extraPluginsDirectory = extraPluginsDirectory.getOrNull()
+        if (extraPluginsDirectory != null) {
+            println("Adding extra plugins to environments")
+            val environmentsDir = skriptRepoDir.resolve("src/test/skript/environments")
+            val mapper = ObjectMapper()
+                    .enable(SerializationFeature.INDENT_OUTPUT)
+            Files.walk(environmentsDir)
+                .filter { it.isRegularFile() && it.extension == "json" }
+                .forEach { envPath ->
+                    val environmentFile = envPath.toFile()
+                    logger.info("Processing environment file: ${environmentFile.absolutePath}")
+
+                    try {
+                        // Read the environment file
+                        val environment = mapper.readTree(environmentFile) as ObjectNode
+
+                        // Initialize resources array if it doesn't exist
+                        if (!environment.has("resources")) {
+                            environment.set<JsonNode>("resources", mapper.createArrayNode())
+                        }
+
+                        val resources = environment.get("resources") as ArrayNode
+
+                        // Add each plugin as a resource
+                        extraPluginsDirectory.asFile.listFiles()?.forEach { pluginPath ->
+                            logger.info("Adding plugin: ${pluginPath.name}")
+                            val resource = mapper.createObjectNode()
+                            resource.put("source", pluginPath.absolutePath)
+                            resource.put("target", "plugins/${pluginPath.name}")
+                            resources.add(resource)
+                        }
+
+                        // Write back the updated environment
+                        mapper.writeValue(environmentFile, environment)
+                    } catch (e: Exception) {
+                        logger.error("Error processing file ${environmentFile.absolutePath}", e)
+                    }
+                }
+        }
+
+        println("./gradlew.bat quickTest")
         try {
-            runCommand(0, skriptRepoDir, "./gradlew.bat", "quick")
-        } catch (exception: IllegalStateException) {
+            runCommand(0, skriptRepoDir, true, "./gradlew.bat", "quickTest")
+        } catch (_: IllegalStateException) {
             throw IllegalStateException("Tests failed")
         }
+        println("complete")
     }
 
 }

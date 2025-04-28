@@ -1,6 +1,6 @@
 plugins {
     java
-    id("org.skriptlang.gradle.test.plugin")
+    id("skript-test")
 }
 
 tasks.skriptTest {
