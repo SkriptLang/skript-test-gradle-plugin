@@ -121,7 +121,7 @@ abstract class SkriptTestTask : DefaultTask() {
                 .filter { it.isRegularFile() && it.extension == "json" }
                 .forEach { envPath ->
                     val environmentFile = envPath.toFile()
-                    logger.info("Processing environment file: ${environmentFile.absolutePath}")
+                    println("Processing environment file: ${environmentFile.absolutePath}")
 
                     try {
                         // Read the environment file
@@ -136,7 +136,7 @@ abstract class SkriptTestTask : DefaultTask() {
 
                         // Add each plugin as a resource
                         extraPluginsDirectory.asFile.listFiles()?.forEach { pluginPath ->
-                            logger.info("Adding plugin: ${pluginPath.name}")
+                            println("Adding plugin: ${pluginPath.name}")
                             val resource = mapper.createObjectNode()
                             resource.put("source", pluginPath.absolutePath)
                             resource.put("target", "plugins/${pluginPath.name}")
@@ -146,7 +146,8 @@ abstract class SkriptTestTask : DefaultTask() {
                         // Write back the updated environment
                         mapper.writeValue(environmentFile, environment)
                     } catch (e: Exception) {
-                        logger.error("Error processing file ${environmentFile.absolutePath}", e)
+                        println("Error processing file ${environmentFile.absolutePath}")
+                        e.printStackTrace()
                     }
                 }
         }
